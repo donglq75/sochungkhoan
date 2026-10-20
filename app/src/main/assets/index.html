@@ -1,0 +1,63 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0f6b5c"><link rel="icon" href="icon-192.png"><title>Sổ chứng khoán</title>
+<style>
+:root{--bg:#f1f4f0;--cd:#fff;--ink:#1b2723;--mu:#68766f;--ln:#dce3dd;--ac:#0f6b5c;--up:#12785a;--dn:#b3342b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#111816;--cd:#1a2420;--ink:#e6efe9;--mu:#8fa098;--ln:#2a3731;--ac:#46c2a8;--up:#4fd0a0;--dn:#f0877c}}
+:root[data-theme=dark]{--bg:#111816;--cd:#1a2420;--ink:#e6efe9;--mu:#8fa098;--ln:#2a3731;--ac:#46c2a8;--up:#4fd0a0;--dn:#f0877c}
+*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font:15px/1.45 "Be Vietnam Pro",system-ui,sans-serif}
+main{max-width:560px;margin:auto;padding:20px 16px 40px}.lb{color:var(--mu);font-size:13px;margin:0}
+#big{font-size:clamp(34px,11vw,52px);font-weight:800;letter-spacing:-.03em;line-height:1.1;margin:4px 0}#big small{font-size:.38em;font-weight:600;margin-left:8px}
+.up{color:var(--up)}.dn{color:var(--dn)}#sub{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}
+#sub div{border-left:3px solid var(--ac);padding-left:8px;font-size:12px;color:var(--mu)}#sub b{display:block;font-size:14px;color:var(--ink)}
+nav{display:flex;overflow-x:auto;border-bottom:1px solid var(--ln);margin-bottom:12px}nav button{flex:1;padding:10px 8px;white-space:nowrap;background:none;border:0;border-bottom:3px solid transparent;color:var(--mu);font:inherit;font-size:14px;font-weight:600}nav button.on{color:var(--ink);border-color:var(--ac)}
+.row{background:var(--cd);border:1px solid var(--ln);border-radius:10px;padding:12px;margin-bottom:8px}.top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.top b{font-size:18px}.num{font-weight:700;text-align:right}.mu{color:var(--mu);font-size:12px}
+input,select,button.go{font:inherit;padding:9px;border:1px solid var(--ln);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
+.px{width:84px;text-align:right}form{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 14px}form .w{grid-column:1/-1}
+button.go{background:var(--ac);color:#fff;border:0;font-weight:700}details summary{cursor:pointer;font-weight:600;color:var(--ac);padding:6px 0}
+.li{display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--ln);font-size:14px}.li button{background:none;border:0;color:var(--mu);font-size:18px}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style></head><body><main>
+<p class="lb">Lãi/lỗ theo cách tính của bạn</p><div id="big"></div><div id="sub"></div>
+<nav id="tabs"></nav><section id="v"></section></main>
+<script>
+const SEED=null;
+const $=s=>document.querySelector(s),f=n=>Math.round(n).toLocaleString('vi-VN'),f2=n=>n.toLocaleString('vi-VN',{maximumFractionDigits:2}),
+pc=n=>(n>0?'+':'')+(n*100).toFixed(2).replace('.',',')+'%',sg=n=>(n>0?'+':'')+f(n),cl=n=>n>=0?'up':'dn',
+today=()=>new Date().toISOString().slice(0,10),dm=d=>d?d.split('-').reverse().join('/'):'',esc=s=>String(s||'').replace(/[<>&"]/g,'');
+let S={dep:[],tr:[],px:{}},tab='pf',ref=null,tm;
+const KS={buy:'Mua',sell:'Bán',div:'Cổ tức tiền',bonus:'CP thưởng'};
+function rate(d){const h=S.cfg.h;let r=h[0];for(const x of h)if(x.d<=(d||''))r=x;return S.cfg.on?[r.fee/100,r.tax/100]:[0,0]}
+function calc(){S.cfg??={on:1};const c=S.cfg;c.h??=[{d:'',fee:c.fee||0,tax:c.tax??0.1}];const m={};for(const t of S.tr){const[fb,tx]=rate(t.d);const o=m[t.k]??={k:t.k,bq:0,bc:0,sq:0,sp:0,fe:0};
+ if(t.s=='buy'){const v=t.q*t.p;o.bq+=t.q;o.bc+=v*(1+fb);o.fe+=v*fb}else if(t.s=='sell'){const v=t.q*t.p;o.sq+=t.q;o.sp+=v*(1-fb-tx);o.fe+=v*(fb+tx)}else o.sp+=t.p}
+ return Object.values(m).map(o=>{o.h=o.bq-o.sq;o.px=+S.px[o.k]||0;o.ok=o.px>0||o.h<=0;o.pl=o.ok?(o.sp+o.h*o.px-o.bc)*1000:0;o.pct=o.bc?o.pl/1000/o.bc:0;o.avg=o.bq?o.bc/o.bq:0;return o})}
+function save(){try{localStorage.setItem('sk',JSON.stringify(S))}catch(e){}clearTimeout(tm);tm=setTimeout(()=>ref&&ref.set(S).catch(()=>{}),500);render()}
+const num=v=>parseFloat(String(v).replace(/\./g,'').replace(',','.'))||0,numd=v=>parseFloat(String(v).replace(',','.'))||0;
+function setPx(k,v){S.px[k]=numd(v);save()}
+function setCfg(k,v){S.cfg[k]=v?1:0;save()}
+function addRate(e){e.preventDefault();const x=e.target,h=S.cfg.h,d=x.d.value,n={d,fee:numd(x.fee.value),tax:numd(x.tax.value)},i=h.findIndex(y=>y.d==d);if(i>=0)h[i]=n;else h.push(n);h.sort((a,b)=>a.d<b.d?-1:1);save()}
+function bkOut(){const t=$('#bk');t.value=JSON.stringify(S);t.focus();t.select()}
+function bkIn(){try{const o=JSON.parse($('#bk').value);if(!o.tr||!o.dep)throw 0;if(confirm('Thay toàn bộ dữ liệu hiện tại bằng dữ liệu vừa dán?')){S=o;save()}}catch(e){alert('Dữ liệu không hợp lệ')}}
+function bkLoad(t){tab='bk';render();$('#bk').value=t;bkIn()}
+function delRate(i){if(S.cfg.h.length>1&&confirm('Xóa mức này?')){S.cfg.h.splice(i,1);S.cfg.h[0].d='';save()}}
+function addTr(e){e.preventDefault();const x=e.target,s=x.s.value,k=x.k.value.toUpperCase().replace(/[^A-Z0-9]/g,''),q=numd(x.q.value),p=numd(x.p.value);
+ if(!k||!(p>0||s=='bonus')||(s!='div'&&!(q>0)))return alert('Nhập đủ mã, số lượng và giá');
+ S.tr.push(s=='div'?{d:x.d.value,k,s:'div',q:0,p}:s=='bonus'?{d:x.d.value,k,s:'buy',q,p:0,n:'CP thưởng'}:{d:x.d.value,k,s,q,p});save()}
+function addDp(e){e.preventDefault();const x=e.target,a=num(x.a.value);if(!(a>0))return alert('Nhập số tiền');S.dep.push({d:x.d.value,t:x.t.value,a});save()}
+function del(w,i){if(confirm('Xóa dòng này?')){S[w].splice(i,1);save()}}
+function render(){const L=calc(),tin=S.dep.filter(x=>x.t=='in').reduce((a,x)=>a+x.a,0),tout=S.dep.filter(x=>x.t=='out').reduce((a,x)=>a+x.a,0),pl=L.reduce((a,o)=>a+o.pl,0);
+ $('#big').innerHTML=`<span class="${cl(pl)}">${sg(pl)}</span><small class="${cl(pl)}">${tin?pc(pl/tin):''}</small>`;
+ $('#sub').innerHTML=`<div>Tổng nộp<b>${f(tin)}</b></div><div>Đã rút<b>${f(tout)}</b></div><div>Nạp ròng<b>${f(tin-tout)}</b></div>`;
+ $('#tabs').innerHTML=[['pf','Danh mục'],['tr','Giao dịch'],['dp','Nạp / Rút'],['cf','Phí & thuế'],['bk','Sao lưu']].map(([i,n])=>`<button class="${tab==i?'on':''}" onclick="tab='${i}';render()">${n}</button>`).join('');
+ let h='';
+ if(tab=='pf')h=L.length?L.map(o=>`<div class="row"><div class="top"><b>${o.k}</b><span class="num ${cl(o.pl)}">${o.ok?sg(o.pl)+' <span class="mu">'+pc(o.pct)+'</span>':'Nhập giá hiện tại'}</span></div>
+ <div class="top" style="margin-top:6px"><span class="mu">Giữ ${f(o.h)} cp · giá vốn TB ${f2(o.avg)}</span><input class="px" inputmode="decimal" value="${o.px||''}" placeholder="Giá nay" onchange="setPx('${o.k}',this.value)" aria-label="Giá hiện tại ${o.k}"></div>
+ <div class="mu" style="margin-top:4px">Tổng mua ${f(o.bc*1000)} · Đã thu về ${f(o.sp*1000)} · Đang giữ ${f(o.h*o.px*1000)}</div></div>`).join('')+'<p class="mu">Giá tính bằng nghìn đồng. Lãi/lỗ = tiền bán + cổ tức + giá trị đang giữ − tổng tiền mua (đã gồm phí và thuế nếu bật). Phí bán số cổ phiếu đang giữ chưa tính cho tới khi bạn bán.</p>':'<p class="mu">Chưa có dữ liệu. Thêm giao dịch đầu tiên ở tab Giao dịch.</p>';
+ if(tab=='tr'){const ks=[...new Set(S.tr.map(t=>t.k))];h=`<details><summary>Thêm giao dịch</summary><form onsubmit="addTr(event)"><select name="s">${Object.entries(KS).map(([a,b])=>`<option value="${a}">${b}</option>`).join('')}</select><input name="d" type="date" value="${today()}"><input name="k" list="ks" placeholder="Mã" required><datalist id="ks">${ks.map(k=>`<option value="${k}">`).join('')}</datalist><input name="q" inputmode="decimal" placeholder="Số lượng"><input class="w" name="p" inputmode="decimal" placeholder="Giá (nghìn đồng) hoặc tiền cổ tức (nghìn đồng)"><button class="go w">Lưu giao dịch</button></form></details>`+
+ S.tr.map((t,i)=>[t,i]).reverse().map(([t,i])=>`<div class="li"><span>${dm(t.d)} · <b>${t.k}</b> ${t.n||KS[t.s]} ${t.s=='div'?'':f(t.q)+(t.n?'':' × '+f2(t.p))}${t.s=='div'?' '+f2(t.p):''}</span><button onclick="del('tr',${i})" aria-label="Xóa">×</button></div>`).join('')}
+ if(tab=='dp')h=`<details><summary>Thêm nạp / rút</summary><form onsubmit="addDp(event)"><select name="t"><option value="in">Nộp vào</option><option value="out">Rút ra</option></select><input name="d" type="date" value="${today()}"><input class="w" name="a" inputmode="numeric" placeholder="Số tiền (đồng)"><button class="go w">Lưu</button></form></details>`+
+ S.dep.map((x,i)=>[x,i]).reverse().map(([x,i])=>`<div class="li"><span>${dm(x.d)} · ${x.t=='in'?'Nộp vào':'Rút ra'}</span><span><b class="${x.t=='in'?'up':'dn'}">${x.t=='in'?'+':'−'}${f(x.a)}</b> <button onclick="del('dep',${i})" aria-label="Xóa">×</button></span></li>`.replace('</li>','</div>')).join('');
+ if(tab=='bk')h=`<p class="mu">Bấm Xuất rồi sao chép toàn bộ nội dung trong ô. Ở app khác, dán vào ô này rồi bấm Nhập.</p><textarea id="bk" rows="8" style="width:100%;font:12px monospace"></textarea><div class="top" style="gap:8px;margin-top:8px"><button class="go" style="flex:1" onclick="bkOut()">Xuất</button><button class="go" style="flex:1" onclick="bkIn()">Nhập</button></div>${window.Android?'<div class="top" style="gap:8px;margin-top:8px"><button class="go" style="flex:1" onclick="Android.save(JSON.stringify(S))">Lưu ra file</button><button class="go" style="flex:1" onclick="Android.open()">Mở file</button></div><p class="mu">Chọn Google Drive hoặc OneDrive trong hộp chọn thư mục để lưu bản sao lưu lên đó.</p>':''}`;
+ if(tab=='cf'){const c=S.cfg,fe=L.reduce((a,o)=>a+o.fe,0)*1000,lb='display:grid;gap:4px;font-size:13px',cur=c.h[c.h.length-1];h=`<label class="w"><input type="checkbox" ${c.on?'checked':''} onchange="setCfg('on',this.checked)"> Tính phí và thuế vào lãi/lỗ</label><form onsubmit="addRate(event)"><label style="${lb}">Phí giao dịch (%)<input name="fee" inputmode="decimal" value="${cur.fee}"></label><label style="${lb}">Thuế bán (%)<input name="tax" inputmode="decimal" value="${cur.tax}"></label><label class="w" style="${lb}">Áp dụng từ ngày<input name="d" type="date" value="${today()}"></label><button class="go w">Lưu mức mới</button></form>${c.h.map((x,i)=>`<div class="li"><span>${x.d?'Từ '+dm(x.d):'Từ đầu'}: phí ${f2(x.fee)}% · thuế ${f2(x.tax)}%</span>${c.h.length>1?`<button onclick="delRate(${i})" aria-label="Xóa">×</button>`:''}</div>`).join('')}<p class="mu">Mức mới chỉ áp dụng cho giao dịch từ ngày hiệu lực trở đi, giao dịch cũ giữ mức cũ. Để trống ngày để sửa mức gốc (áp dụng từ đầu). Phí áp dụng cho cả lệnh mua và lệnh bán, bạn tra trong biểu phí của công ty chứng khoán. Thuế thu nhập cá nhân khi bán chứng khoán là 0,1% giá trị mỗi lần bán.</p><p>Tổng phí và thuế đã tính: <b>${f(fe)}</b></p>`}
+ $('#v').innerHTML=h}
+try{const l=JSON.parse(localStorage.getItem('sk'));if(l&&l.tr)S=l}catch(e){}render();;
+</script></body></html>
