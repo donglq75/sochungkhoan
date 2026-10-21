@@ -18,6 +18,9 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity {
@@ -68,8 +71,77 @@ public class MainActivity extends Activity {
                 i.setType("*/*");
                 startActivityForResult(i, OPEN);
             }
+            @JavascriptInterface
+            public void prices(final String csv) {
+                new Thread(() -> {
+                    JSONObject pr = new JSONObject(), sr = new JSONObject();
+                    JSONArray e = new JSONArray();
+                    String[] names = {"VPS", "VNDirect", "DNSE", "TCBS"};
+                    for (String t : csv.split(",")) {
+                        t = t.trim().toUpperCase(Locale.US);
+                        if (!t.matches("[A-Z0-9]{1,10}")) continue;
+                        double v = 0;
+                        String src = "";
+                        for (String n : names) {
+                            try { v = fetchQuote(n, t); } catch (Exception ex) { v = 0; }
+                            if (v > 0) { src = n; break; }
+                        }
+                        try {
+                            if (v > 0) { pr.put(t, v); sr.put(t, src); } else { e.put(t); }
+                        } catch (Exception ex) { }
+                    }
+                    String out = "{}";
+                    try {
+                        JSONObject r = new JSONObject();
+                        r.put("p", pr);
+                        r.put("s", sr);
+                        r.put("e", e);
+                        out = r.toString();
+                    } catch (Exception ex) { }
+                    final String res = out;
+                    runOnUiThread(() -> w.evaluateJavascript("pxDone(" + JSONObject.quote(res) + ")", null));
+                }).start();
+            }
         }, "Android");
         w.loadUrl("file:///android_asset/index.html");
+    }
+
+    String httpGet(String u) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(8000);
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36");
+        c.setRequestProperty("Accept", "application/json");
+        if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
+        InputStream in = c.getInputStream();
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        in.close();
+        return new String(bo.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    double fetchQuote(String name, String t) throws Exception {
+        long now = System.currentTimeMillis() / 1000;
+        double v;
+        if (name.equals("VPS")) {
+            JSONArray a = new JSONArray(httpGet("https://bgapidatafeed.vps.com.vn/getliststockdata/" + t));
+            JSONObject o = a.getJSONObject(0);
+            v = o.optDouble("lastPrice", 0);
+            if (!(v > 0)) v = o.optDouble("r", 0);
+        } else if (name.equals("VNDirect")) {
+            JSONObject j = new JSONObject(httpGet("https://finfo-api.vndirect.com.vn/v4/stock_prices?sort=date&size=1&q=code:" + t));
+            v = j.getJSONArray("data").getJSONObject(0).getDouble("close");
+        } else if (name.equals("DNSE")) {
+            JSONObject j = new JSONObject(httpGet("https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?resolution=1D&symbol=" + t + "&from=" + (now - 864000) + "&to=" + now));
+            JSONArray c = j.getJSONArray("c");
+            v = c.getDouble(c.length() - 1);
+        } else {
+            JSONObject j = new JSONObject(httpGet("https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term?type=stock&resolution=D&countBack=1&ticker=" + t + "&to=" + now));
+            v = j.getJSONArray("data").getJSONObject(0).getDouble("close");
+        }
+        return v > 1000 ? v / 1000 : v;
     }
 
     @Override
