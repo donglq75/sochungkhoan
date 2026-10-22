@@ -60,8 +60,8 @@ public class MainActivity extends Activity {
                 pending = json;
                 Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
-                i.setType("application/json");
-                i.putExtra(Intent.EXTRA_TITLE, "so-chung-khoan-" + new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date()) + ".json");
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_TITLE, "so-chung-khoan-" + new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date()) + ".txt");
                 startActivityForResult(i, SAVE);
             }
             @JavascriptInterface
