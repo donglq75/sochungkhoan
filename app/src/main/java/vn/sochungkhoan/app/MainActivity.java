@@ -74,7 +74,7 @@ public class MainActivity extends Activity {
             @JavascriptInterface
             public void prices(final String csv) {
                 new Thread(() -> {
-                    JSONObject pr = new JSONObject(), sr = new JSONObject();
+                    JSONObject pr = new JSONObject(), prev = new JSONObject(), sr = new JSONObject();
                     JSONArray e = new JSONArray();
                     String[] names = {"VPS", "VNDirect", "DNSE", "TCBS"};
                     for (String t : csv.split(",")) {
@@ -87,13 +87,17 @@ public class MainActivity extends Activity {
                             if (v > 0) { src = n; break; }
                         }
                         try {
-                            if (v > 0) { pr.put(t, v); sr.put(t, src); } else { e.put(t); }
+                            if (v > 0) {
+                                pr.put(t, v); sr.put(t, src);
+                                try { double pv = fetchPreviousClose(t, now); if (pv > 0) prev.put(t, pv); } catch (Exception ignored) { }
+                            } else { e.put(t); }
                         } catch (Exception ex) { }
                     }
                     String out = "{}";
                     try {
                         JSONObject r = new JSONObject();
                         r.put("p", pr);
+                        r.put("prev", prev);
                         r.put("s", sr);
                         r.put("e", e);
                         out = r.toString();
@@ -102,8 +106,107 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> w.evaluateJavascript("pxDone(" + JSONObject.quote(res) + ")", null));
                 }).start();
             }
+
+            @JavascriptInterface
+            public void sheetsSync(final String endpoint, final String payload) {
+                new Thread(() -> {
+                    String response;
+                    try {
+                        if (endpoint == null || !endpoint.startsWith("https://script.google.com/"))
+                            throw new Exception("URL phải là địa chỉ HTTPS Google Apps Script dạng /macros/s/.../exec");
+                        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+                        HttpURLConnection c = (HttpURLConnection) new URL(endpoint).openConnection();
+                        c.setRequestMethod("POST");
+                        c.setDoOutput(true);
+                        c.setInstanceFollowRedirects(false);
+                        c.setConnectTimeout(15000);
+                        c.setReadTimeout(20000);
+                        c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                        c.setRequestProperty("Accept", "application/json");
+                        OutputStream os = c.getOutputStream(); os.write(body); os.close();
+                        int status = c.getResponseCode();
+                        String location = c.getHeaderField("Location");
+                        if (status >= 300 && status < 400 && location != null) {
+                            c.disconnect();
+                            HttpURLConnection follow = (HttpURLConnection) new URL(location).openConnection();
+                            follow.setRequestMethod("GET");
+                            follow.setConnectTimeout(15000);
+                            follow.setReadTimeout(20000);
+                            status = follow.getResponseCode();
+                            InputStream in = status >= 400 ? follow.getErrorStream() : follow.getInputStream();
+                            response = readText(in);
+                            follow.disconnect();
+                        } else {
+                            InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+                            response = readText(in);
+                            c.disconnect();
+                        }
+                        if (status >= 400) throw new Exception("HTTP " + status + ": " + response);
+                    } catch (Exception ex) {
+                        JSONObject err = new JSONObject();
+                        try { err.put("ok", false); err.put("message", ex.getMessage() == null ? "Lỗi kết nối" : ex.getMessage()); response = err.toString(); }
+                        catch (Exception ignored) { response = "{\"ok\":false,\"message\":\"Lỗi kết nối\"}"; }
+                    }
+                    final String result = response;
+                    runOnUiThread(() -> w.evaluateJavascript("syncDone(" + JSONObject.quote(result) + ")", null));
+                }).start();
+            }
         }, "Android");
         w.loadUrl("file:///android_asset/index.html");
+    }
+
+    String readText(InputStream in) throws Exception {
+        if (in == null) return "";
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        in.close();
+        return new String(bo.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    double fetchPreviousClose(String ticker, long now) throws Exception {
+        // VPS reference price is the exchange's previous-session reference price.
+        try {
+            JSONArray a = new JSONArray(httpGet("https://bgapidatafeed.vps.com.vn/getliststockdata/" + ticker));
+            if (a.length() > 0) {
+                JSONObject o = a.getJSONObject(0);
+                double v = o.optDouble("r", 0);
+                if (!(v > 0)) v = o.optDouble("referencePrice", 0);
+                if (!(v > 0)) v = o.optDouble("refPrice", 0);
+                if (v > 0) return v > 1000 ? v / 1000 : v;
+            }
+        } catch (Exception ignored) { }
+        // Fallback: latest VNDirect daily close strictly before today's Vietnam date.
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        df.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Ho_Chi_Minh"));
+        long nowMs = now * 1000L;
+        String today = df.format(new Date(nowMs));
+        String from = df.format(new Date(nowMs - 14L * 86400000L));
+        String u = "https://finfo-api.vndirect.com.vn/v4/stock_prices?sort=date&size=30&q=code:" + ticker + "~date:gte:" + from + "~date:lte:" + today;
+        HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+        c.setConnectTimeout(8000); c.setReadTimeout(8000);
+        c.setRequestProperty("User-Agent", "Mozilla/5.0");
+        c.setRequestProperty("Accept", "application/json");
+        c.setRequestProperty("Origin", "https://dstock.vndirect.com.vn");
+        c.setRequestProperty("Referer", "https://dstock.vndirect.com.vn/");
+        if (c.getResponseCode() != 200) throw new Exception("VNDirect history HTTP " + c.getResponseCode());
+        JSONObject j = new JSONObject(readText(c.getInputStream()));
+        c.disconnect();
+        JSONArray data = j.optJSONArray("data");
+        if (data == null) return 0;
+        String bestDate = "";
+        double best = 0;
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject o = data.getJSONObject(i);
+            String date = o.optString("date", "");
+            if (date.length() >= 10) date = date.substring(0, 10);
+            if (!date.isEmpty() && date.compareTo(today) < 0 && date.compareTo(bestDate) > 0) {
+                double close = o.optDouble("close", o.optDouble("adClose", 0));
+                if (close > 0) { bestDate = date; best = close; }
+            }
+        }
+        return best > 1000 ? best / 1000 : best;
     }
 
     String httpGet(String u) throws Exception {
