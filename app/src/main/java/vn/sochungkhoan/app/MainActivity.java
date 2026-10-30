@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
                 new Thread(() -> {
                     JSONObject pr = new JSONObject(), prev = new JSONObject(), sr = new JSONObject();
                     JSONArray e = new JSONArray();
+                    long now = System.currentTimeMillis() / 1000;
                     String[] names = {"VPS", "VNDirect", "DNSE", "TCBS"};
                     for (String t : csv.split(",")) {
                         t = t.trim().toUpperCase(Locale.US);

@@ -8,6 +8,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate embedded JavaScript and Apps Script
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          html = Path('app/src/main/assets/index.html').read_text()
+          match = re.search(r'<script>(.*?)</script>', html, re.S)
+          if not match:
+              raise SystemExit('No app script found')
+          Path('/tmp/app.js').write_text(match.group(1))
+          Path('/tmp/sheets.js').write_text(Path('scripts/Code.gs').read_text())
+          PY
+          node --check /tmp/app.js
+          node --check /tmp/sheets.js
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
