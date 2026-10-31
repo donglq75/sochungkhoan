@@ -50,9 +50,13 @@ assert.equal(context.nextDataRow_(prefilled,4,[1,2,3,5,6,7,9],new Map(),'prefill
   'constant cash dividend in column G must count as entered data');
 function post(payload){return JSON.parse(context.doPost({postData:{contents:JSON.stringify({token:'TEST_TOKEN',...payload})}}).text);}
 
-let r=post({baseline:true,events:[{id:'old-buy',kind:'buy',ticker:'PC1',date:'2025-01-01',qty:4,price:12}]});
-assert.equal(r.ok,true);assert.equal(r.added,0);assert.equal(r.skipped,1);
+let r=post({baseline:true,events:[
+  {id:'old-buy',kind:'buy',ticker:'PC1',date:'2025-01-01',qty:4,price:12},
+  {id:'legacy-stock-dividend',kind:'buy',ticker:'SSI',date:'2025-01-02',qty:2,price:0}
+]});
+assert.equal(r.ok,true);assert.equal(r.added,0);assert.equal(r.skipped,2);assert.equal(r.errors.length,0);
 assert.equal(book.getSheetByName('PC1').getRange(4,1).getValues()[0][0],'','baseline wrote old stock data');
+assert.equal(book.getSheetByName('SSI. V2').getRange(4,1).getValues()[0][0],'','baseline wrote legacy stock dividend');
 r=post({baseline:true,events:[{id:'old-buy',kind:'buy',ticker:'PC1',date:'2025-01-01',qty:4,price:12}]});
 assert.equal(r.skipped,1,'baseline retry must remain idempotent');
 
