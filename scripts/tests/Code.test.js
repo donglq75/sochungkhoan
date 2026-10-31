@@ -7,7 +7,7 @@ class Range {
   getValues(){return Array.from({length:this.rows},(_,ri)=>Array.from({length:this.cols},(_,ci)=>this.sheet.values.get((this.row+ri)+','+(this.col+ci))??''));}
   getDisplayValues(){return this.getValues().map(r=>r.map(v=>String(v)));}
   setValues(data){data.forEach((r,ri)=>r.forEach((v,ci)=>this.setValue(v,ri,ci)));return this;}
-  setValue(value,ri=0,ci=0){this.sheet.values.set((this.row+ri)+','+(this.col+ci),value);this.sheet.formulas.delete((this.row+ri)+','+(this.col+ci));return this;}
+  setValue(value,ri=0,ci=0){const key=(this.row+ri)+','+(this.col+ci);if(this.sheet.failCell===key){this.sheet.failCell=null;throw new Error('simulated write interruption');}this.sheet.values.set(key,value);this.sheet.formulas.delete((this.row+ri)+','+(this.col+ci));return this;}
   getFormula(){return this.sheet.formulas.get(this.row+','+this.col)||'';}
   setFormula(formula){this.sheet.formulas.set(this.row+','+this.col,formula);this.sheet.values.set(this.row+','+this.col,'');return this;}
 }
@@ -44,6 +44,14 @@ assert.equal(book.getSheetByName('PC1').getRange(4,4).getFormula(),'=B4*C4');
 assert.equal(book.getSheetByName('PC1').getRange(2,4).getFormula(),'=SUM(D4:D4)','existing P/L totals formula changed');
 r=post({events:[{id:'new-pc1',kind:'buy',ticker:'PC1',date:'2026-10-31',qty:2,price:30}]});
 assert.equal(r.added,0);assert.equal(r.skipped,1);assert.equal(book.getSheetByName('PC1').getRange(4,2).getValues()[0][0],2);
+book.getSheetByName('PC1').failCell='5,1';
+r=post({events:[{id:'interrupted',kind:'buy',ticker:'PC1',date:'2026-10-31',qty:5,price:31},{id:'after-pending',kind:'buy',ticker:'PC1',date:'2026-10-31',qty:6,price:32}]});
+assert.equal(r.added,1);assert.equal(r.errors.length,1);
+assert.equal(book.getSheetByName('PC1').getRange(5,2).getValues()[0][0],'');
+assert.equal(book.getSheetByName('PC1').getRange(6,2).getValues()[0][0],6,'pending reservation reused by later event');
+r=post({events:[{id:'interrupted',kind:'buy',ticker:'PC1',date:'2026-10-31',qty:5,price:31}]});
+assert.equal(r.added,1);assert.equal(book.getSheetByName('PC1').getRange(5,2).getValues()[0][0],5);
+assert.equal(book.getSheetByName('PC1').getRange(6,2).getValues()[0][0],6);
 
 r=post({events:[{id:'new-ssi',kind:'buy',ticker:'SSI',date:'2026-10-31',qty:3,price:21}]});
 assert.equal(r.added,1);assert.equal(book.getSheetByName('SSI. V2').getRange(4,2).getValues()[0][0],3);

@@ -27,7 +27,7 @@ today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).
 let S={dep:[],tr:[],px:{},prevPx:{}},tab='pf',ref=null,tm;
 const KS={buy:'Mua',sell:'Bán',div:'Cổ tức tiền',bonus:'CP thưởng'};
 const APP_TICKERS=new Set(['PC1','SSI']),CASH_START_DATE='2026-04-10';
-function normalizeTicker(v){const x=String(v||'').trim().toUpperCase().replace(/\s+/g,' ');return ['SSI','SSI. V2','SSI V2','SSIV2'].includes(x)?'SSI':x.replace(/[^A-Z0-9]/g,'')}
+function normalizeTicker(v){const x=String(v||'').trim().toUpperCase().replace(/\s+/g,' ');return ['SSI','SSI.V2','SSI. V2','SSI V2','SSIV2'].includes(x)?'SSI':x.replace(/[^A-Z0-9]/g,'')}
 function newEventId(){return window.crypto&&crypto.randomUUID?crypto.randomUUID():'evt-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12)}
 function rate(d){const h=S.cfg.h;let r=h[0];for(const x of h)if(x.d<=(d||''))r=x;return S.cfg.on?[r.fee/100,r.tax/100]:[0,0]}
 function calc(){S.prevPx??={};S.cfg??={on:1};const c=S.cfg;c.h??=[{d:'',fee:c.fee||0,tax:c.tax??0.1}];const m={};for(const t of S.tr){const[fb,tx]=rate(t.d);const o=m[t.k]??={k:t.k,bq:0,bc:0,sq:0,sp:0,fe:0};

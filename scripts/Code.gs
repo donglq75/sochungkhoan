@@ -12,7 +12,8 @@ function doPost(e) {
       return json_({ok:false, message:'Mã bảo mật không đúng hoặc chưa được cấu hình.'});
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const log = getLog_(ss);
-    const known = readKnownEvents_(log);
+    const known = readKnownEvents_(log), reservedRows = new Map();
+    known.forEach(v => { if (v.status === 'pending' && v.sheet) reservedRows.set(v.sheet, Math.max(reservedRows.get(v.sheet) || 0, v.row || 0)); });
     const events = Array.isArray(payload.events) ? payload.events : [];
     const baseline = payload.baseline === true;
     let added = 0, skipped = 0;
@@ -25,13 +26,14 @@ function doPost(e) {
         const prior = known.get(id);
         if (prior && prior.status !== 'pending') { skipped++; return; }
 
-        const plan = buildPlan_(ss, ev, prior && prior.sheet, prior && prior.row);
+        const plan = buildPlan_(ss, ev, prior, reservedRows);
         if (baseline && !prior) {
           const logRow = appendLog_(log, id, ev, 'baseline', '', '');
           known.set(id, {status:'baseline', row:logRow});
           skipped++;
           return;
         }
+        reservedRows.set(plan.sheet, Math.max(reservedRows.get(plan.sheet) || 0, plan.row));
 
         let logRow;
         if (prior) logRow = prior.logRow;
@@ -94,7 +96,7 @@ function appendLog_(log, id, ev, status, sheet, row) {
   return target;
 }
 
-function buildPlan_(ss, ev, retrySheet, retryRow) {
+function buildPlan_(ss, ev, prior, reservedRows) {
   const kinds = ['buy','sell','div','bonus','deposit','withdraw'];
   if (!kinds.includes(ev.kind)) throw new Error('Loại sự kiện không hỗ trợ: ' + ev.kind);
   const date = parseDate_(ev.date);
@@ -103,8 +105,8 @@ function buildPlan_(ss, ev, retrySheet, retryRow) {
     const sh = ss.getSheetByName('Dash board');
     if (!sh) throw new Error('Không tìm thấy sheet Dash board');
     const sheet = 'Dash board';
-    if (retrySheet && retrySheet !== sheet) throw new Error('Không khớp đích retry');
-    const row = retryRow || lastDataRow_(sh,9,[1,2,3,4]) + 1;
+    if (prior && prior.sheet && prior.sheet !== sheet) throw new Error('Không khớp đích retry');
+    const row = prior && prior.status === 'pending' ? prior.row : nextDataRow_(sh,9,[1,2,3,4],reservedRows,sheet);
     const amount = Number(ev.amount || 0);
     if (!(amount > 0)) throw new Error('Số tiền nạp/rút phải lớn hơn 0');
     return {kind:'cash',sheet,row,date,kindEvent:ev.kind,amount};
@@ -113,8 +115,8 @@ function buildPlan_(ss, ev, retrySheet, retryRow) {
   const ticker = sheetTicker_(ev.ticker);
   const sh = ss.getSheetByName(ticker);
   if (!sh) throw new Error('Không tìm thấy sheet "' + ticker + '".');
-  if (retrySheet && retrySheet !== ticker) throw new Error('Không khớp đích retry');
-  const row = retryRow || lastDataRow_(sh,4,[1,2,3,5,6,7,9]) + 1;
+  if (prior && prior.sheet && prior.sheet !== ticker) throw new Error('Không khớp đích retry');
+  const row = prior && prior.status === 'pending' ? prior.row : nextDataRow_(sh,4,[1,2,3,5,6,7,9],reservedRows,ticker);
   const qty = Number(ev.qty || 0), price = Number(ev.price || 0), updates = [];
   updates.push({col:1,value:date});
   if (ev.kind === 'buy') {
@@ -174,6 +176,10 @@ function extendCashTotals_(sh, row) {
     const m = formula.match(/^=SUM\(([A-Z]+9):([A-Z]+)(\d+)\)$/i);
     if (m && row > Number(m[3])) cell.setFormula('=SUM(' + m[1] + '9:' + m[2] + row + ')');
   });
+}
+
+function nextDataRow_(sh, first, columns, reservedRows, sheetName) {
+  return Math.max(lastDataRow_(sh,first,columns) + 1, (reservedRows.get(sheetName) || 0) + 1);
 }
 
 function lastDataRow_(sh, first, columns) {
