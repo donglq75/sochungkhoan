@@ -6,6 +6,7 @@ class Range {
   constructor(sheet,row,col,rows=1,cols=1){Object.assign(this,{sheet,row,col,rows,cols});}
   getValues(){return Array.from({length:this.rows},(_,ri)=>Array.from({length:this.cols},(_,ci)=>this.sheet.values.get((this.row+ri)+','+(this.col+ci))??''));}
   getDisplayValues(){return this.getValues().map(r=>r.map(v=>String(v)));}
+  getFormulas(){return Array.from({length:this.rows},(_,ri)=>Array.from({length:this.cols},(_,ci)=>this.sheet.formulas.get((this.row+ri)+','+(this.col+ci))||''));}
   setValues(data){data.forEach((r,ri)=>r.forEach((v,ci)=>this.setValue(v,ri,ci)));return this;}
   setValue(value,ri=0,ci=0){const key=(this.row+ri)+','+(this.col+ci);if(this.sheet.failCell===key){this.sheet.failCell=null;throw new Error('simulated write interruption');}this.sheet.values.set(key,value);this.sheet.formulas.delete((this.row+ri)+','+(this.col+ci));return this;}
   getFormula(){return this.sheet.formulas.get(this.row+','+this.col)||'';}
@@ -30,6 +31,23 @@ const book=new Book(), context={console,Map,Set,Date,Math,Number,String,Array,JS
   ContentService:{MimeType:{JSON:'application/json'},createTextOutput:s=>({text:s,setMimeType(){return this;}})}
 };
 vm.runInNewContext(fs.readFileSync('scripts/Code.gs','utf8').replace('CHANGE_ME_TO_A_LONG_RANDOM_TOKEN','TEST_TOKEN'),context);
+
+const prefilled = new Sheet('prefilled');
+for (let row=4; row<=71; row++) {
+  prefilled.getRange(row,4).setFormula('=B'+row+'*C'+row);
+  prefilled.values.set(row+',4',0);
+  prefilled.getRange(row,7).setFormula('=E'+row+'*F'+row);
+  prefilled.values.set(row+',7',0);
+}
+prefilled.getRange(50,1).setValue('2026-10-01');
+prefilled.getRange(50,2).setValue(7);
+assert.equal(context.lastDataRow_(prefilled,4,[1,2,3,5,6,7,9]),50,
+  'formula-only rows must not be treated as transactions');
+assert.equal(context.nextDataRow_(prefilled,4,[1,2,3,5,6,7,9],new Map(),'prefilled'),51,
+  'new transaction should follow last row with entered data, not formula fill-down');
+prefilled.getRange(53,7).setValue(125);
+assert.equal(context.nextDataRow_(prefilled,4,[1,2,3,5,6,7,9],new Map(),'prefilled'),54,
+  'constant cash dividend in column G must count as entered data');
 function post(payload){return JSON.parse(context.doPost({postData:{contents:JSON.stringify({token:'TEST_TOKEN',...payload})}}).text);}
 
 let r=post({baseline:true,events:[{id:'old-buy',kind:'buy',ticker:'PC1',date:'2025-01-01',qty:4,price:12}]});
