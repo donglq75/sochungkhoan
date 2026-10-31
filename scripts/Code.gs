@@ -184,10 +184,14 @@ function nextDataRow_(sh, first, columns, reservedRows, sheetName) {
 
 function lastDataRow_(sh, first, columns) {
   const max = sh.getMaxRows();
-  const vals = sh.getRange(first,1,max-first+1,Math.max.apply(null,columns)).getValues();
+  const width = Math.max.apply(null, columns);
+  const range = sh.getRange(first,1,max-first+1,width);
+  const vals = range.getValues();
+  const formulas = range.getFormulas();
   let last = first - 1;
   vals.forEach((r,i) => {
-    if (columns.some(c => r[c-1] !== '' && r[c-1] !== null)) last = first + i;
+    if (columns.some(c => !formulas[i][c-1] && r[c-1] !== '' && r[c-1] !== null))
+      last = first + i;
   });
   return last;
 }
