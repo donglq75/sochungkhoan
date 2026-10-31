@@ -62,6 +62,6 @@ assert.equal(r.added,0);assert.equal(r.errors.length,1);
 r=post({events:[{id:'new-cash',kind:'withdraw',date:'2026-04-10',amount:500}]});
 assert.equal(r.added,1);assert.equal(book.getSheetByName('Dash board').getRange(9,3).getValues()[0][0],500);
 r=post({events:[{id:'bad-ticker',kind:'buy',ticker:'FPT',date:'2026-10-31',qty:1,price:1}]});
-assert.equal(r.errors.length,1);assert.equal(book.getSheetByName('PC1').getRange(5,2).getValues()[0][0],'');
+assert.equal(r.errors.length,1);assert.equal(book.getSheetByName('PC1').getRange(7,2).getValues()[0][0],'');
 
-console.log('Apps Script sync tests passed (baseline, retry IDs, ticker scope/mapping, cutoff, formulas).');
+console.log('Apps Script sync tests passed (baseline, retry IDs and row reservations, ticker mapping, cash cutoff, formula preservation).');
