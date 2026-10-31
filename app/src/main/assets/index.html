@@ -26,6 +26,9 @@ pc=n=>(n>0?'+':'')+(n*100).toFixed(2).replace('.',',')+'%',sg=n=>(n>0?'+':'')+f(
 today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')},dm=d=>d?d.split('-').reverse().join('/'):'',esc=s=>String(s||'').replace(/[<>&"]/g,'');
 let S={dep:[],tr:[],px:{},prevPx:{}},tab='pf',ref=null,tm;
 const KS={buy:'Mua',sell:'Bán',div:'Cổ tức tiền',bonus:'CP thưởng'};
+const APP_TICKERS=new Set(['PC1','SSI']),CASH_START_DATE='2026-04-10';
+function normalizeTicker(v){const x=String(v||'').trim().toUpperCase().replace(/\s+/g,' ');return ['SSI','SSI. V2','SSI V2','SSIV2'].includes(x)?'SSI':x.replace(/[^A-Z0-9]/g,'')}
+function newEventId(){return window.crypto&&crypto.randomUUID?crypto.randomUUID():'evt-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12)}
 function rate(d){const h=S.cfg.h;let r=h[0];for(const x of h)if(x.d<=(d||''))r=x;return S.cfg.on?[r.fee/100,r.tax/100]:[0,0]}
 function calc(){S.prevPx??={};S.cfg??={on:1};const c=S.cfg;c.h??=[{d:'',fee:c.fee||0,tax:c.tax??0.1}];const m={};for(const t of S.tr){const[fb,tx]=rate(t.d);const o=m[t.k]??={k:t.k,bq:0,bc:0,sq:0,sp:0,fe:0};
  if(t.s=='buy'){const v=t.q*t.p;o.bq+=t.q;o.bc+=v*(1+fb);o.fe+=v*fb}else if(t.s=='sell'){const v=t.q*t.p;o.sq+=t.q;o.sp+=v*(1-fb-tx);o.fe+=v*(fb+tx)}else o.sp+=t.p}
@@ -74,27 +77,30 @@ function getPx(){const ks=calc().filter(o=>o.h>0).map(o=>o.k);if(!ks.length)retu
 function pxDone(j){const r=JSON.parse(j),p=r.p||{},pp=r.prev||{},e=r.e||[],ok=Object.keys(p);ok.forEach(k=>S.px[k]=p[k]);Object.keys(pp).forEach(k=>{if(pp[k]>0)S.prevPx[k]=pp[k]});S.pxAt=today();S.prevPxAt=Object.keys(pp).length?today():'';pxm=(ok.length?'Đã cập nhật '+ok.map(k=>k+' '+f2(p[k])+' ('+r.s[k]+')').join(', ')+' lúc '+new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'})+'.':'')+(e.length?' Không lấy được giá: '+e.join(', ')+'. Hãy nhập tay.':'');save()}
 function bkLoad(t){tab='bk';render();$('#bk').value=t;bkIn()}
 function delRate(i){if(S.cfg.h.length>1&&confirm('Xóa mức này?')){S.cfg.h.splice(i,1);S.cfg.h[0].d='';save()}}
-function addTr(e){e.preventDefault();const x=e.target,s=x.s.value,k=x.k.value.toUpperCase().replace(/[^A-Z0-9]/g,''),q=numd(x.q.value),p=numd(x.p.value);
- if(!k||!(p>0||s=='bonus')||(s!='div'&&!(q>0)))return alert('Nhập đủ mã, số lượng và giá');
- S.tr.push(s=='div'?{d:x.d.value,k,s:'div',q:0,p}:s=='bonus'?{d:x.d.value,k,s:'buy',q,p:0,n:'CP thưởng'}:{d:x.d.value,k,s,q,p});save()}
-function addDp(e){e.preventDefault();const x=e.target,a=num(x.a.value);if(!(a>0))return alert('Nhập số tiền');S.dep.push({d:x.d.value,t:x.t.value,a});save()}
+function addTr(e){e.preventDefault();const x=e.target,s=x.s.value,k=normalizeTicker(x.k.value),q=numd(x.q.value),p=numd(x.p.value);
+ if(!APP_TICKERS.has(k))return alert('Ứng dụng chỉ theo dõi PC1 và SSI.');
+ if(!(p>0||s=='bonus')||(s!='div'&&!(q>0)))return alert('Nhập đủ mã, số lượng và giá');
+ const id=newEventId(),d=x.d.value;S.tr.push(s=='div'?{id,d,k,s:'div',q:0,p}:s=='bonus'?{id,d,k,s:'buy',q,p:0,n:'CP thưởng'}:{id,d,k,s,q,p});save()}
+function addDp(e){e.preventDefault();const x=e.target,a=num(x.a.value),d=x.d.value;if(d<CASH_START_DATE)return alert('Chỉ ghi nhận nạp/rút từ ngày 10/04/2026.');if(!(a>0))return alert('Nhập số tiền');S.dep.push({id:newEventId(),d,t:x.t.value,a});save()}
 function del(w,i){if(confirm('Xóa dòng này?')){S[w].splice(i,1);save()}}
 function saveGs(){S.cfg??={};S.cfg.gsUrl=$('#gsurl').value.trim();S.cfg.gsToken=$('#gstoken').value.trim();save();$('#gsmsg').textContent='Đã lưu cấu hình trên điện thoại.'}
 function syncSheets(){
  if(!window.Android||!Android.sheetsSync)return alert('Chức năng đồng bộ chỉ dùng trong ứng dụng Android.');
  saveGs();
  if(!S.cfg.gsUrl||!S.cfg.gsToken)return alert('Nhập URL Web App và mã bảo mật trước.');
- const id=()=>Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
  const events=[];
- for(const t of S.tr){t.id??=id();events.push({id:t.id,kind:t.s=='buy'&&t.n?'bonus':t.s,ticker:t.k,date:t.d,qty:+t.q||0,price:+t.p||0,note:t.n||''})}
- for(const x of S.dep){x.id??=id();events.push({id:x.id,kind:x.t=='in'?'deposit':'withdraw',date:x.d,amount:+x.a||0})}
- save();
- $('#gsmsg').textContent='Đang đồng bộ '+events.length+' sự kiện...';
- Android.sheetsSync(S.cfg.gsUrl,JSON.stringify({token:S.cfg.gsToken,events,version:1}));
+ for(const t of S.tr){t.id??=newEventId();if(APP_TICKERS.has(normalizeTicker(t.k)))events.push({id:t.id,kind:t.s=='buy'&&t.n?'bonus':t.s,ticker:normalizeTicker(t.k),date:t.d,qty:+t.q||0,price:+t.p||0,note:t.n||''})}
+ for(const x of S.dep){if(String(x.d||'')<CASH_START_DATE)continue;x.id??=newEventId();events.push({id:x.id,kind:x.t=='in'?'deposit':'withdraw',date:x.d,amount:+x.a||0})}
+ const baseline=!S.cfg.gsBaselineDone;S.cfg.gsBaselineRequested=baseline;save();
+ $('#gsmsg').textContent=baseline?'Đang tạo mốc ban đầu, không ghi giao dịch hiện có vào Sheets...':'Đang đồng bộ '+events.length+' sự kiện...';
+ Android.sheetsSync(S.cfg.gsUrl,JSON.stringify({token:S.cfg.gsToken,events,baseline,version:2}));
 }
 function syncDone(raw){let r;try{r=JSON.parse(raw)}catch(e){r={ok:false,message:'Phản hồi máy chủ không hợp lệ: '+raw}}
  const el=$('#gsmsg');if(!el)return;
- el.textContent=r.ok?('Đồng bộ xong: thêm '+(r.added||0)+', đã có '+(r.skipped||0)+', lỗi '+((r.errors||[]).length)+'. '+((r.errors||[]).join(' | '))):(r.message||'Đồng bộ thất bại.');
+ const errors=r.errors||[];
+ if(r.ok&&r.baseline&&S.cfg.gsBaselineRequested&&!errors.length){S.cfg.gsBaselineDone=true;delete S.cfg.gsBaselineRequested;save()}
+ const target=$('#gsmsg')||el;
+ target.textContent=r.ok?((r.baseline?'Mốc ban đầu đã lưu; dữ liệu cũ không được ghi thêm. ':'')+'Đồng bộ xong: thêm '+(r.added||0)+', đã có '+(r.skipped||0)+', lỗi '+errors.length+'. '+errors.join(' | ')):(r.message||'Đồng bộ thất bại.');
 }
 function render(){const L=calc(),tin=S.dep.filter(x=>x.t=='in').reduce((a,x)=>a+x.a,0),tout=S.dep.filter(x=>x.t=='out').reduce((a,x)=>a+x.a,0),pl=L.reduce((a,o)=>a+o.pl,0);
  $('#big').innerHTML=`<span class="${cl(pl)}">${sg(pl)}</span><small class="${cl(pl)}">${tin?pc(pl/tin):''}</small>`;
@@ -105,14 +111,14 @@ function render(){const L=calc(),tin=S.dep.filter(x=>x.t=='in').reduce((a,x)=>a+
  <div class="top" style="margin-top:6px"><span class="mu">Giữ ${f(o.h)} cp · giá vốn TB ${f2(o.avg)}</span><input class="px" inputmode="decimal" value="${o.px||''}" placeholder="Giá nay" onchange="setPx('${o.k}',this.value)" aria-label="Giá hiện tại ${o.k}"></div>
  <div class="mu" style="margin-top:4px">Tổng mua ${f(o.bc*1000)} · Đã thu về ${f(o.sp*1000)} · Đang giữ ${f(o.h*o.px*1000)}</div></div>`).join('')+'<p class="mu">Giá tính bằng nghìn đồng. Lãi/lỗ = tiền bán + cổ tức + giá trị đang giữ − tổng tiền mua (đã gồm phí và thuế nếu bật). Phí bán số cổ phiếu đang giữ chưa tính cho tới khi bạn bán.</p>':'<p class="mu">Chưa có dữ liệu. Thêm giao dịch đầu tiên ở tab Giao dịch.</p>';
  if(tab=='pf'&&window.Android&&L.length)h=pxBar()+h;
- if(tab=='tr'){const ks=[...new Set(S.tr.map(t=>t.k))];h=`<details><summary>Thêm giao dịch</summary><form onsubmit="addTr(event)"><select name="s">${Object.entries(KS).map(([a,b])=>`<option value="${a}">${b}</option>`).join('')}</select><input name="d" type="date" value="${today()}"><input name="k" list="ks" placeholder="Mã" required><datalist id="ks">${ks.map(k=>`<option value="${k}">`).join('')}</datalist><input name="q" inputmode="decimal" placeholder="Số lượng"><input class="w" name="p" inputmode="decimal" placeholder="Giá (nghìn đồng) hoặc tiền cổ tức (nghìn đồng)"><button class="go w">Lưu giao dịch</button></form></details>`+
+ if(tab=='tr'){const ks=[...new Set(S.tr.map(t=>t.k))];h=`<details><summary>Thêm giao dịch</summary><form onsubmit="addTr(event)"><select name="s">${Object.entries(KS).map(([a,b])=>`<option value="${a}">${b}</option>`).join('')}</select><input name="d" type="date" value="${today()}"><input name="k" list="ks" placeholder="Mã PC1 hoặc SSI" required><datalist id="ks">${ks.map(k=>`<option value="${k}">`).join('')}</datalist><input name="q" inputmode="decimal" placeholder="Số lượng"><input class="w" name="p" inputmode="decimal" placeholder="Giá (nghìn đồng) hoặc tiền cổ tức (nghìn đồng)"><button class="go w">Lưu giao dịch</button></form></details>`+
  trFilter()+trList()}
- if(tab=='dp')h=`<details><summary>Thêm nạp / rút</summary><form onsubmit="addDp(event)"><select name="t"><option value="in">Nộp vào</option><option value="out">Rút ra</option></select><input name="d" type="date" value="${today()}"><input class="w" name="a" inputmode="numeric" placeholder="Số tiền (đồng)"><button class="go w">Lưu</button></form></details>`+
+ if(tab=='dp')h=`<details><summary>Thêm nạp / rút</summary><form onsubmit="addDp(event)"><select name="t"><option value="in">Nộp vào</option><option value="out">Rút ra</option></select><input name="d" type="date" min="2026-04-10" value="${today()}"><input class="w" name="a" inputmode="numeric" placeholder="Số tiền (đồng)"><button class="go w">Lưu</button></form></details>`+
  S.dep.map((x,i)=>[x,i]).reverse().map(([x,i])=>`<div class="li"><span>${dm(x.d)} · ${x.t=='in'?'Nộp vào':'Rút ra'}</span><span><b class="${x.t=='in'?'up':'dn'}">${x.t=='in'?'+':'−'}${f(x.a)}</b> <button onclick="del('dep',${i})" aria-label="Xóa">×</button></span></li>`.replace('</li>','</div>')).join('');
  
 if(tab=='gs')h=`<p class="mu">Đồng bộ các giao dịch và nạp/rút sang Google Sheets. Lãi/lỗ trong ngày không được gửi lên bảng tính. Cần triển khai Apps Script đi kèm dự án trước.</p><label style="display:grid;gap:4px;margin:10px 0">URL Web App<input id="gsurl" type="url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(S.cfg?.gsUrl||'')}"></label><label style="display:grid;gap:4px;margin:10px 0">Mã bảo mật<input id="gstoken" type="password" value="${esc(S.cfg?.gsToken||'')}" placeholder="Mã đã đặt trong Apps Script"></label><div class="top" style="gap:8px"><button class="go" style="flex:1" onclick="saveGs()">Lưu cấu hình</button><button class="go" style="flex:1" onclick="syncSheets()">Đồng bộ ngay</button></div><p id="gsmsg" class="mu" style="margin-top:10px">Dữ liệu đồng bộ được chống trùng bằng mã sự kiện.</p>`;
  if(tab=='bk')h=`<p class="mu">Bấm Xuất rồi sao chép toàn bộ nội dung trong ô. Ở app khác, dán vào ô này rồi bấm Nhập.</p><textarea id="bk" rows="8" style="width:100%;font:12px monospace"></textarea><div class="top" style="gap:8px;margin-top:8px"><button class="go" style="flex:1" onclick="bkOut()">Xuất</button><button class="go" style="flex:1" onclick="bkIn()">Nhập</button></div>${window.Android?'<div class="top" style="gap:8px;margin-top:8px"><button class="go" style="flex:1" onclick="Android.save(JSON.stringify(S))">Lưu ra file</button><button class="go" style="flex:1" onclick="Android.open()">Mở file</button></div><p class="mu">Chọn Google Drive hoặc OneDrive trong hộp chọn thư mục để lưu bản sao lưu lên đó.</p>':''}`;
  if(tab=='cf'){const c=S.cfg,fe=L.reduce((a,o)=>a+o.fe,0)*1000,lb='display:grid;gap:4px;font-size:13px',cur=c.h[c.h.length-1];h=`<label class="w"><input type="checkbox" ${c.on?'checked':''} onchange="setCfg('on',this.checked)"> Tính phí và thuế vào lãi/lỗ</label><form onsubmit="addRate(event)"><label style="${lb}">Phí giao dịch (%)<input name="fee" inputmode="decimal" value="${cur.fee}"></label><label style="${lb}">Thuế bán (%)<input name="tax" inputmode="decimal" value="${cur.tax}"></label><label class="w" style="${lb}">Áp dụng từ ngày<input name="d" type="date" value="${today()}"></label><button class="go w">Lưu mức mới</button></form>${c.h.map((x,i)=>`<div class="li"><span>${x.d?'Từ '+dm(x.d):'Từ đầu'}: phí ${f2(x.fee)}% · thuế ${f2(x.tax)}%</span>${c.h.length>1?`<button onclick="delRate(${i})" aria-label="Xóa">×</button>`:''}</div>`).join('')}<p class="mu">Mức mới chỉ áp dụng cho giao dịch từ ngày hiệu lực trở đi, giao dịch cũ giữ mức cũ. Để trống ngày để sửa mức gốc (áp dụng từ đầu). Phí áp dụng cho cả lệnh mua và lệnh bán, bạn tra trong biểu phí của công ty chứng khoán. Thuế thu nhập cá nhân khi bán chứng khoán là 0,1% giá trị mỗi lần bán.</p><p>Tổng phí và thuế đã tính: <b>${f(fe)}</b></p>`}
  $('#v').innerHTML=h}
-try{const l=JSON.parse(localStorage.getItem('sk'));if(l&&l.tr)S=l}catch(e){}S.prevPx??={};S.cfg??={on:1,h:[{d:'',fee:0,tax:0.1}]};render();;
+try{const l=JSON.parse(localStorage.getItem('sk'));if(l&&l.tr)S=l}catch(e){}S.prevPx??={};S.dep=(S.dep||[]).filter(x=>String(x.d||'')>=CASH_START_DATE);S.tr=(S.tr||[]).map(t=>({...t,k:normalizeTicker(t.k)})).filter(t=>APP_TICKERS.has(t.k));S.cfg??={on:1,h:[{d:'',fee:0,tax:0.1}]};render();;
 </script></body></html>

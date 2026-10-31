@@ -17,11 +17,11 @@ The endpoint checks the token before writing. Use a private token, and do not pu
 
 ## What gets written
 
-- Buy and sell events go to the existing tab named after the ticker.
+- The app tracks PC1 and SSI only. SSI is written to the existing `SSI. V2` tab; PC1 is written to `PC1`.
 - Cash dividends are written to column G with the note `ct bằng tiền`.
 - Bonus shares are written as zero-cost buy quantity with the note `CP thưởng`.
-- Deposits and withdrawals go to the `Dash board` tab, in the transaction area beginning at row 9.
-- A hidden `_AppSync` tab records event IDs so repeated syncs do not duplicate rows.
+- Deposits and withdrawals dated 10/04/2026 or later go to the `Dash board` tab, in the transaction area beginning at row 9. Older cash events are excluded.
+- The first sync records IDs for events already in the app as a baseline and does not append those old events. Later syncs append only new IDs. A hidden `_AppSync` tab persists IDs and pending row targets so retrying a partially completed write does not duplicate it.
 - Summary SUM formulas are extended only when a new row passes their current end row. Existing P/L formula logic is not rewritten.
 
 If the app reports that a ticker tab is missing, create a tab with the exact ticker name first, using the same column layout as the other stock tabs.

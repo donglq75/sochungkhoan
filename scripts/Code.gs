@@ -1,5 +1,7 @@
 const SPREADSHEET_ID = '1HjOSX7PgHFJ3FgrWuoqGSue-TMEkJa3EuOsJUFlwvQI';
 const SYNC_TOKEN = 'CHANGE_ME_TO_A_LONG_RANDOM_TOKEN';
+const CASH_START_DATE = '2026-04-10';
+const STOCK_SHEETS = { PC1: 'PC1', SSI: 'SSI. V2' };
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
@@ -10,26 +12,42 @@ function doPost(e) {
       return json_({ok:false, message:'Mã bảo mật không đúng hoặc chưa được cấu hình.'});
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const log = getLog_(ss);
-    const lastLog = log.getLastRow();
-    const known = new Set(lastLog > 1 ? log.getRange(2,1,lastLog-1,1).getDisplayValues().flat() : []);
+    const known = readKnownEvents_(log);
     const events = Array.isArray(payload.events) ? payload.events : [];
+    const baseline = payload.baseline === true;
     let added = 0, skipped = 0;
     const errors = [];
+
     events.forEach(ev => {
       try {
         if (!ev || !ev.id || !ev.kind) throw new Error('Sự kiện thiếu mã hoặc loại giao dịch');
-        if (known.has(String(ev.id))) { skipped++; return; }
-        if (['buy','sell','div','bonus'].includes(ev.kind)) appendStock_(ss, ev);
-        else if (ev.kind === 'deposit' || ev.kind === 'withdraw') appendCash_(ss, ev);
-        else throw new Error('Loại sự kiện không hỗ trợ: ' + ev.kind);
-        log.appendRow([String(ev.id), new Date(), ev.kind, ev.ticker || '', ev.date || '']);
-        known.add(String(ev.id));
+        const id = String(ev.id);
+        const prior = known.get(id);
+        if (prior && prior.status !== 'pending') { skipped++; return; }
+
+        const plan = buildPlan_(ss, ev, prior && prior.sheet, prior && prior.row);
+        if (baseline && !prior) {
+          const logRow = appendLog_(log, id, ev, 'baseline', '', '');
+          known.set(id, {status:'baseline', row:logRow});
+          skipped++;
+          return;
+        }
+
+        let logRow;
+        if (prior) logRow = prior.logRow;
+        else {
+          logRow = appendLog_(log, id, ev, 'pending', plan.sheet, plan.row);
+          known.set(id, {status:'pending', sheet:plan.sheet, row:plan.row, logRow:logRow});
+        }
+        writePlan_(ss, plan);
+        log.getRange(logRow,6,1,3).setValues([['done',plan.sheet,plan.row]]);
+        known.set(id, {status:'done', sheet:plan.sheet, row:plan.row, logRow:logRow});
         added++;
       } catch (err) {
         errors.push((ev && ev.ticker ? ev.ticker + ': ' : '') + (err.message || String(err)));
       }
     });
-    return json_({ok:true, added:added, skipped:skipped, errors:errors});
+    return json_({ok:true, baseline:baseline, added:added, skipped:skipped, errors:errors});
   } catch (err) {
     return json_({ok:false, message:err.message || String(err)});
   } finally {
@@ -45,38 +63,101 @@ function getLog_(ss) {
   let sh = ss.getSheetByName('_AppSync');
   if (!sh) {
     sh = ss.insertSheet('_AppSync');
-    sh.getRange(1,1,1,5).setValues([['event_id','synced_at','kind','ticker','date']]);
+    sh.getRange(1,1,1,8).setValues([['event_id','synced_at','kind','ticker','date','status','target_sheet','target_row']]);
     sh.hideSheet();
+  } else {
+    sh.getRange(1,1,1,8).setValues([['event_id','synced_at','kind','ticker','date','status','target_sheet','target_row']]);
   }
   return sh;
 }
 
-function appendStock_(ss, ev) {
-  const ticker = String(ev.ticker || '').trim().toUpperCase();
-  if (!/^[A-Z0-9.]{1,12}$/.test(ticker)) throw new Error('Mã cổ phiếu không hợp lệ');
-  const sh = ss.getSheetByName(ticker);
-  if (!sh) throw new Error('Không tìm thấy sheet "' + ticker + '". Hãy tạo sheet theo mã trước khi đồng bộ.');
-  const row = lastDataRow_(sh, 4, [1,2,3,5,6,7,9]) + 1;
-  if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), row - sh.getMaxRows());
+function readKnownEvents_(log) {
+  const last = log.getLastRow(), known = new Map();
+  if (last <= 1) return known;
+  log.getRange(2,1,last-1,8).getValues().forEach((r,i) => {
+    if (r[0]) known.set(String(r[0]), {
+      status: String(r[5] || 'done'),
+      sheet: String(r[6] || ''),
+      row: Number(r[7] || 0),
+      logRow: i + 2
+    });
+  });
+  return known;
+}
+
+function appendLog_(log, id, ev, status, sheet, row) {
+  const target = log.getLastRow() + 1;
+  if (target > log.getMaxRows()) log.insertRowsAfter(log.getMaxRows(), target - log.getMaxRows());
+  log.getRange(target,1,1,8).setValues([[
+    id, new Date(), ev.kind, ev.ticker || '', ev.date || '', status, sheet || '', row || ''
+  ]]);
+  return target;
+}
+
+function buildPlan_(ss, ev, retrySheet, retryRow) {
+  const kinds = ['buy','sell','div','bonus','deposit','withdraw'];
+  if (!kinds.includes(ev.kind)) throw new Error('Loại sự kiện không hỗ trợ: ' + ev.kind);
   const date = parseDate_(ev.date);
-  const qty = Number(ev.qty || 0), price = Number(ev.price || 0);
-  const values = [date, '', '', '', '', '', '', '', ''];
+  if (ev.kind === 'deposit' || ev.kind === 'withdraw') {
+    if (String(ev.date) < CASH_START_DATE) throw new Error('Chỉ nhận nạp/rút từ ngày 10/04/2026');
+    const sh = ss.getSheetByName('Dash board');
+    if (!sh) throw new Error('Không tìm thấy sheet Dash board');
+    const sheet = 'Dash board';
+    if (retrySheet && retrySheet !== sheet) throw new Error('Không khớp đích retry');
+    const row = retryRow || lastDataRow_(sh,9,[1,2,3,4]) + 1;
+    const amount = Number(ev.amount || 0);
+    if (!(amount > 0)) throw new Error('Số tiền nạp/rút phải lớn hơn 0');
+    return {kind:'cash',sheet,row,date,kindEvent:ev.kind,amount};
+  }
+
+  const ticker = sheetTicker_(ev.ticker);
+  const sh = ss.getSheetByName(ticker);
+  if (!sh) throw new Error('Không tìm thấy sheet "' + ticker + '".');
+  if (retrySheet && retrySheet !== ticker) throw new Error('Không khớp đích retry');
+  const row = retryRow || lastDataRow_(sh,4,[1,2,3,5,6,7,9]) + 1;
+  const qty = Number(ev.qty || 0), price = Number(ev.price || 0), updates = [];
+  updates.push({col:1,value:date});
   if (ev.kind === 'buy') {
     if (!(qty > 0) || !(price > 0)) throw new Error('Lệnh mua thiếu số lượng hoặc giá');
-    values[1] = qty; values[2] = price; values[3] = '=B' + row + '*C' + row;
+    updates.push({col:2,value:qty},{col:3,value:price},{col:4,formula:'=B'+row+'*C'+row});
   } else if (ev.kind === 'sell') {
     if (!(qty > 0) || !(price > 0)) throw new Error('Lệnh bán thiếu số lượng hoặc giá');
-    values[4] = qty; values[5] = price; values[6] = '=E' + row + '*F' + row;
-    values[7] = '=((SUM($B$4:B' + row + ')-SUM($E$4:E' + row + '))*F' + row + '+SUM($G$4:G' + row + ')-SUM($D$4:D' + row + '))*1000';
+    updates.push({col:5,value:qty},{col:6,value:price},{col:7,formula:'=E'+row+'*F'+row},
+      {col:8,formula:'=((SUM($B$4:B'+row+')-SUM($E$4:E'+row+'))*F'+row+'+SUM($G$4:G'+row+')-SUM($D$4:D'+row+'))*1000'});
   } else if (ev.kind === 'div') {
     if (!(price > 0)) throw new Error('Cổ tức tiền phải lớn hơn 0');
-    values[6] = price; values[8] = 'ct bằng tiền';
-  } else if (ev.kind === 'bonus') {
+    updates.push({col:7,value:price},{col:9,value:'ct bằng tiền'});
+  } else {
     if (!(qty > 0)) throw new Error('Số cổ phiếu thưởng phải lớn hơn 0');
-    values[1] = qty; values[2] = 0; values[3] = '=B' + row + '*C' + row; values[8] = 'CP thưởng';
+    updates.push({col:2,value:qty},{col:3,value:0},{col:4,formula:'=B'+row+'*C'+row},{col:9,value:'CP thưởng'});
   }
-  sh.getRange(row,1,1,9).setValues([values]);
-  extendStockTotals_(sh, row);
+  return {kind:'stock',sheet:ticker,row,date,updates};
+}
+
+function sheetTicker_(value) {
+  const ticker = String(value || '').trim().toUpperCase().replace(/\s+/g,' ');
+  if (ticker === 'PC1') return STOCK_SHEETS.PC1;
+  if (ticker === 'SSI' || ticker === 'SSI. V2' || ticker === 'SSI V2') return STOCK_SHEETS.SSI;
+  throw new Error('Ứng dụng chỉ đồng bộ mã PC1 và SSI');
+}
+
+function writePlan_(ss, plan) {
+  const sh = ss.getSheetByName(plan.sheet);
+  if (!sh) throw new Error('Không tìm thấy sheet đích "' + plan.sheet + '"');
+  if (plan.row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), plan.row - sh.getMaxRows());
+  if (plan.kind === 'stock') {
+    plan.updates.forEach(u => {
+      const cell = sh.getRange(plan.row,u.col);
+      if (u.formula) cell.setFormula(u.formula); else cell.setValue(u.value);
+    });
+    extendStockTotals_(sh, plan.row);
+  } else {
+    sh.getRange(plan.row,1,1,4).setValues([[
+      plan.date, plan.kindEvent === 'deposit' ? plan.amount : '',
+      plan.kindEvent === 'withdraw' ? plan.amount : '', 'App'
+    ]]);
+    extendCashTotals_(sh, plan.row);
+  }
 }
 
 function extendStockTotals_(sh, row) {
@@ -87,14 +168,7 @@ function extendStockTotals_(sh, row) {
   });
 }
 
-function appendCash_(ss, ev) {
-  const sh = ss.getSheetByName('Dash board');
-  if (!sh) throw new Error('Không tìm thấy sheet Dash board');
-  const row = lastDataRow_(sh, 9, [1,2,3,4]) + 1;
-  if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), row - sh.getMaxRows());
-  const date = parseDate_(ev.date), amount = Number(ev.amount || 0);
-  if (!(amount > 0)) throw new Error('Số tiền nạp/rút phải lớn hơn 0');
-  sh.getRange(row,1,1,4).setValues([[date, ev.kind === 'deposit' ? amount : '', ev.kind === 'withdraw' ? amount : '', 'App']]);
+function extendCashTotals_(sh, row) {
   [2,3].forEach(col => {
     const cell = sh.getRange(3,col), formula = cell.getFormula();
     const m = formula.match(/^=SUM\(([A-Z]+9):([A-Z]+)(\d+)\)$/i);
@@ -115,7 +189,10 @@ function lastDataRow_(sh, first, columns) {
 function parseDate_(value) {
   const s = String(value || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error('Ngày giao dịch không hợp lệ');
-  return new Date(s + 'T00:00:00');
+  const [y,m,d] = s.split('-').map(Number), check = new Date(Date.UTC(y,m-1,d));
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m-1 || check.getUTCDate() !== d)
+    throw new Error('Ngày giao dịch không hợp lệ');
+  return new Date(y,m-1,d);
 }
 
 function json_(obj) {

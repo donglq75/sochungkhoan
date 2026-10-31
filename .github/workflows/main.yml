@@ -8,6 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test Apps Script sync behavior
+        run: node scripts/tests/Code.test.js
       - name: Validate embedded JavaScript and Apps Script
         run: |
           python3 - <<'PY'
