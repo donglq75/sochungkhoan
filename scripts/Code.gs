@@ -26,13 +26,13 @@ function doPost(e) {
         const prior = known.get(id);
         if (prior && prior.status !== 'pending') { skipped++; return; }
 
-        const plan = buildPlan_(ss, ev, prior, reservedRows);
         if (baseline && !prior) {
           const logRow = appendLog_(log, id, ev, 'baseline', '', '');
           known.set(id, {status:'baseline', row:logRow});
           skipped++;
           return;
         }
+        const plan = buildPlan_(ss, ev, prior, reservedRows);
         reservedRows.set(plan.sheet, Math.max(reservedRows.get(plan.sheet) || 0, plan.row));
 
         let logRow;
